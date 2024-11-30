@@ -8,6 +8,21 @@ public class ProbabilisticSequence {
 
     private final Map<Character, List<Double>> probabilities;
 
+    private final ScoringScheme scoringScheme;
+
+    private ProbabilisticSequence(Map<Character, List<Double>> probabilities, ScoringScheme scoringScheme) {
+        this.probabilities = probabilities;
+        this.scoringScheme = scoringScheme;
+    }
+
+    public ProbabilisticSequence() {
+        this.probabilities = new HashMap<>();
+        for (char nucleotide : List.of('A', 'C', 'G', 'T')) {
+            this.probabilities.put(nucleotide, new ArrayList<>());
+        }
+        this.scoringScheme = null;
+    }
+
     /**
      * Constructs a `ProbabilisticSequence` object by loading sequence file and probability file which builds a
      * probability matrix representing each nucleotide (A, C, G, T) at every position in the sequence.
@@ -17,8 +32,9 @@ public class ProbabilisticSequence {
      *                              the most likely nucleotide at each position in the sequence (the rest of the
      *                              nucleotides will be assumed to all have equal probabilities)
      */
-    public ProbabilisticSequence(String sequenceFileName, String probabilitiesFileName) {
+    public ProbabilisticSequence(String sequenceFileName, String probabilitiesFileName, ScoringScheme scoringScheme) {
         probabilities = new HashMap<>();
+        this.scoringScheme = scoringScheme;
         List.of('A', 'C', 'G', 'T').forEach(n -> probabilities.put(n, new ArrayList<>()));
 
         try (BufferedReader sequenceReader = new BufferedReader(new FileReader(sequenceFileName));
@@ -86,11 +102,10 @@ public class ProbabilisticSequence {
      * @param length       the length to go through the probabilistic sequence
      * @param insertionProb  the probability of inserting a random nucleotide at any position.
      * @param deletionProb   the probability of deleting a nucleotide from the sequence.
-     * @param seed           the seed for the random number generator (for reproducibility).
+     * @param r           java util random class (for reproducibility).
      * @return a randomly generated sequence as a String.
      */
-    public String generateRandomSequence(int startingIndex, int length, double insertionProb, double deletionProb, long seed) {
-        Random r = new Random(seed);
+    public String generateRandomSequence(int startingIndex, int length, double insertionProb, double deletionProb, Random r) {
         StringBuilder sequence = new StringBuilder();
         for (int i = startingIndex; i < startingIndex + length; i++) {
             if (r.nextDouble() < deletionProb) continue;
@@ -114,8 +129,29 @@ public class ProbabilisticSequence {
         return sequence.toString();
     }
 
-    public Map<Character, List<Double>> getProbabilities() {
-        return probabilities;
+    public ProbabilisticSequence subSequence(int startIndex, int endIndex) {
+        if (startIndex < 0) startIndex = 0;
+        if (endIndex > length()) endIndex = length();
+        Map<Character, List<Double>> subProbabilities = new HashMap<>();
+        for (char nucleotide : List.of('A', 'C', 'G', 'T')) {
+            subProbabilities.put(nucleotide, new ArrayList<>(probabilities.get(nucleotide).subList(startIndex, endIndex)));
+        }
+        return new ProbabilisticSequence(subProbabilities, scoringScheme);
+    }
+
+    public double scoreChar(char c, int i) {
+        switch (scoringScheme) {
+            case POWER1 -> {
+                return 2 * probabilities.get(c).get(i) - 1;
+            }
+            case POWER0_5 -> {
+                return 2 * Math.pow(probabilities.get(c).get(i), 0.5) - 1;
+            }
+            case POWER1_5 -> {
+                return 2 * Math.pow(probabilities.get(c).get(i), 1.5) - 1;
+            }
+            default -> throw new IllegalArgumentException("Unrecognized scoring scheme");
+        }
     }
 
     public int length() {
@@ -126,5 +162,32 @@ public class ProbabilisticSequence {
         return Stream.of('A', 'C', 'G', 'T')
                 .max((c1, c2) -> Double.compare(probabilities.get(c1).get(index), probabilities.get(c2).get(index)))
                 .orElseThrow();
+    }
+
+    public void insertEmpty() {
+        for (char nucleotide : List.of('A', 'C', 'G', 'T')) {
+            probabilities.get(nucleotide).add(0, 0.);
+        }
+    }
+
+    public void insertCopy(ProbabilisticSequence seq, int index) {
+        for (char nucleotide : List.of('A', 'C', 'G', 'T')) {
+            probabilities.get(nucleotide).add(0, seq.probabilities.get(nucleotide).get(index));
+        }
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+
+        for (char nucleotide : List.of('A', 'C', 'G', 'T')) {
+            sb.append(nucleotide).append(":\t\t");
+            for (double probability : probabilities.get(nucleotide)) {
+                sb.append(String.format("%.3f", probability)).append("\t");
+            }
+            sb.append("\n");
+        }
+
+        return sb.toString();
     }
 }

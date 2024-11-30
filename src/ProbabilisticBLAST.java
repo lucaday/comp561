@@ -1,7 +1,6 @@
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-public class ProbabilisticBLAST implements Runnable {
+public class ProbabilisticBLAST {
 
     private final String q;
 
@@ -19,42 +18,60 @@ public class ProbabilisticBLAST implements Runnable {
 
     private final double L;
 
-    public ProbabilisticBLAST(String q, ProbabilisticSequence genome, int wordLength) {
+    public ProbabilisticBLAST(String q,
+                              ProbabilisticSequence genome,
+                              Map<String, List<Integer>> indices,
+                              int wordLength,
+                              double threshold,
+                              double K,
+                              double L) {
         this.q = q;
         this.genome = genome;
-        this.indices = genome.buildIndices(wordLength);
+        this.indices = indices;
         this.wordLength = wordLength;
         this.delta = 10;
-        this.threshold = 1;
-        this.K = 1;
-        this.L = 1;
+        this.threshold = threshold;
+        this.K = K;
+        this.L = L;
     }
 
-    @Override
-    public void run() {
+    public List<ProbabilisticAlignment> getAlignments() {
         // For each w-mer in q
         List<Integer> genomeIndices;
+        Set<Integer> exploredIndices = new HashSet<>();
+        List<ProbabilisticAlignment> alignments = new ArrayList<>();
         for (int i = 0; i < q.length() - wordLength; i++) {
             genomeIndices = this.indices.get(q.substring(i, i + wordLength));
             if (genomeIndices == null) continue;
 
             // Perform ungapped extension at each genomeIndex where this substring occurs ('seed' is determined by i and index)
             for (Integer genomeIndex : genomeIndices) {
-                if (ungappedExtension(i, genomeIndex)) {
-                    System.out.println("Found HSP at " + genomeIndex);
+                double E = ungappedExtension(i, genomeIndex);
+                if (E < threshold) {
+                    int indexToExplore = genomeIndex - i;
+                    if (exploredIndices.add(indexToExplore)) {
+                        ProbabilisticNeedlemanWunsch needlemanWunsch = new ProbabilisticNeedlemanWunsch(q, genome.subSequence(indexToExplore, indexToExplore + q.length()));
+                        ProbabilisticAlignment alignment = needlemanWunsch.getAlignment();
+                        alignment.setE(K, genome.length(), q.length(), L);
+                        alignment.setGenomeIndex(indexToExplore);
+                        if (alignment.getEScore() < threshold) {
+                            alignments.add(alignment);
+                        }
+                    }
                 }
             }
         }
+        return alignments;
     }
 
-    private boolean ungappedExtension(int qStartIndex, int genomeStartIndex) {
+    private double ungappedExtension(int qStartIndex, int genomeStartIndex) {
         // Ungapped extension from the right
         int qIndex = qStartIndex;
         int genomeIndex = genomeStartIndex;
         double currScore = 0.0;
         double maxScoreRight = 0;
         while (qIndex < q.length() && genomeIndex < genome.length()) {
-            currScore += scoreChar(q.charAt(qIndex), genomeIndex);
+            currScore += genome.scoreChar(q.charAt(qIndex), genomeIndex);
             if (currScore >= maxScoreRight) maxScoreRight = currScore; // Greater than OR EQUAL TO! Because a probability of 0.5 gives a score of 0
             if (currScore < maxScoreRight - delta) break;
             qIndex++;
@@ -67,7 +84,7 @@ public class ProbabilisticBLAST implements Runnable {
         currScore = 0.0;
         double maxScoreLeft = 0;
         while (qIndex >= 0 && genomeIndex >= 0) {
-            currScore += scoreChar(q.charAt(qIndex), genomeIndex);
+            currScore += genome.scoreChar(q.charAt(qIndex), genomeIndex);
             if (currScore >= maxScoreLeft) maxScoreLeft = currScore; // Greater than OR EQUAL TO! Because a probability of 0.5 gives a score of 0
             if (currScore < maxScoreLeft - delta) break;
             qIndex--;
@@ -77,13 +94,6 @@ public class ProbabilisticBLAST implements Runnable {
         // Get total score from max left and right scores, return true if E is less than threshold (HSP found!)
         double totalScore = maxScoreLeft + maxScoreRight;
         // E = K m n e ^ (-L * s), s = alignment score, m = |D|, n = |Q|, L and K depend on scoring scheme
-        double E = K * genome.length() * q.length() * Math.exp(-L * totalScore);
-
-        return E < threshold;
-    }
-
-    private double scoreChar(char c, int genomeIndex) {
-        // using 2x - 1 to linearly rescale probabilities from [0, 1] to [-1, 1]
-        return 2 * genome.getProbabilities().get(c).get(genomeIndex) - 1;
+        return K * genome.length() * q.length() * Math.exp(-L * totalScore);
     }
 }
